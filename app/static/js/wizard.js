@@ -39,7 +39,6 @@ function atualizarUI() {
 
     const barra = document.getElementById('barra-progresso');
     barra.style.width = `${percentual}%`;
-    barra.style.backgroundPosition = `${100 - percentual}% 50%`;
 
     document.getElementById('lbl-etapa').textContent = `Passo ${stepAtual + 1} de ${totalSteps}`;
     document.getElementById('lbl-progresso').textContent = `${percentual}%`;
@@ -150,11 +149,14 @@ function toggleOpcao(card) {
     atualizarUI();
 }
 
-function toggleBool(card) {
-    const campo = card.dataset.campo;
-    card.parentElement.querySelectorAll('.opcao-card').forEach(c => c.classList.remove('selecionado'));
-    card.classList.add('selecionado');
-    estado.respostas[campo] = true;
+function toggleSimNaoPergunta(btn) {
+    const campo = btn.dataset.campo;
+    const valor = btn.dataset.valor === 'true';
+
+    btn.parentElement.querySelectorAll('.btn-simnao').forEach(b => b.classList.remove('selecionado'));
+    btn.classList.add('selecionado');
+
+    estado.respostas[campo] = valor;
     atualizarUI();
 }
 
@@ -298,12 +300,20 @@ function mostrarResumo() {
     atualizarUI();
 }
 
+function corKPI(valor) {
+    if (valor >= 2.0) return 'kpi-verde';
+    if (valor >= 1.0) return 'kpi-dourado';
+    return 'kpi-vermelho';
+}
+
 function mostrarResultado(r) {
     estado.stepAtual = 7;
     atualizarUI();
 
-    const corBadge = r.percentual_bde >= 2.0 ? 'var(--verde)' :
-                     r.percentual_bde >= 1.0 ? 'var(--dourado)' : 'var(--vermelho)';
+    const apto = r.apto_a_receber;
+    const badgeCor = apto
+        ? (r.percentual_bde >= 2.0 ? 'var(--verde)' : r.percentual_bde >= 1.0 ? 'var(--dourado)' : 'var(--amarelo)')
+        : 'var(--vermelho)';
 
     const clsIdepe = r.percentual_idepe >= 1.0 ? 'positivo' : r.percentual_idepe >= 0.75 ? 'neutro' : 'negativo';
 
@@ -323,12 +333,12 @@ function mostrarResultado(r) {
     }
 
     document.getElementById('resultado-area').innerHTML = `
-        <div class="resultado-badge" style="background: ${corBadge}; color: white;">
+        <div class="resultado-badge ${apto ? '' : 'badge-nao-apto'}" style="background: ${badgeCor}; color: white;">
             <span class="percentual">${r.percentual_formatado}</span>
             <span class="label-pct">BDE</span>
         </div>
-        <h2 class="resultado-titulo">${r.apto_a_receber ? 'Escola apta a receber o BDE' : 'Escola nao atingiu o minimo'}</h2>
-        <p class="resultado-subtitulo">${r.apto_a_receber
+        <h2 class="resultado-titulo">${apto ? 'Escola apta a receber o BDE' : 'Escola nao atingiu o minimo'}</h2>
+        <p class="resultado-subtitulo">${apto
             ? 'Confira o detalhamento do calculo do seu bonus.'
             : 'A escola nao atingiu percentual minimo para receber o bonus.'}</p>
         <div class="detalhes-grid">
@@ -375,6 +385,7 @@ function reiniciar() {
         participacao_maior_80: null,
     };
     document.querySelectorAll('.opcao-card').forEach(c => c.classList.remove('selecionado'));
+    document.querySelectorAll('.btn-simnao').forEach(b => b.classList.remove('selecionado'));
     document.querySelectorAll('.input-campo input').forEach(i => i.value = '');
     document.getElementById('btn-proximo').style.display = 'flex';
     document.getElementById('btn-proximo').textContent = 'Proximo';
