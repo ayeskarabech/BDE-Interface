@@ -1,26 +1,32 @@
 """
-Serviço de cálculo do Bônus de Desempenho Educacional (BDE).
+Servico de calculo do BDE — formula exata da celula C45 da planilha.
 
-Arquitetura:
-  - Tabela de conversão via bisect (O(log n), zero ifs encadeados)
-  - Pipeline funcional com compose/reduce
-  - Dataclasses imutáveis para configuração
-  - Strategy pattern para bônus independentes
+Cadeia de calculo (ordem da planilha):
 
-Referências de células (aba "Simulador BDE"):
-  B21/B29/B37  → variação por etapa (Resultado − Meta)
-  H47 / J9     → média ponderada das variações
-  H45          → percentual IDEPE (tabela de conversão)
-  B40/B41      → cota resultado / além do resultado
-  B42/B43/B44  → cotas de equidade, elementares, participação
-  C45          → cota do BDE (fórmula composta)
+  B21/B29/B37  diferenca por etapa = resultado - meta
+  H47          media ponderada pelas matriculas, ROUND(..., 4)
+  H45          conversao da media em percentual (tabela)
+  B40          cota resultado = min(H45, 1)
+  B41          cota alem do resultado = H45 - B40
+  B42          cota equidade = 1 se D12="SIM", senao 0
+  B43          cota elementares = 1 se D13="SIM", senao 0
+  B44          cota participacao = 0.5 se >= 80%, senao 0
+  C45          cota do BDE (formula composta) + B44
+
+Formula C45 (EXATA da planilha):
+  =SE(E(B40=1;B41=1;B42=1;B43=1); 2,5;
+    SE(E(B40<=1;OU(B42=1;B43=1)); 1+B40;
+      SE(E((B40+B41)>1;OU(B42=1;B43=1)); 2;
+        B40
+      )
+    )
+  ) + B44
 """
 
 from __future__ import annotations
 
 import bisect
-from dataclasses import dataclass, field
-from typing import Callable, Final, Sequence
+from typing import Final
 
 from src.bde.schemas import (
     DetalheEtapa,
@@ -31,281 +37,157 @@ from src.bde.schemas import (
 
 
 # ============================================================================
-# Configuração — dataclasses imutáveis para constantes de negócio
+# Tabela de conversao: diferenca -> percentual (H45)
 # ============================================================================
 
-
-@dataclass(frozen=True)
-class FaixaConversao:
-    """Uma faixa da tabela de conversão variação → percentual."""
-
-    limite_inferior: float
-    percentual: float
-
-
-@dataclass(frozen=True)
-class ConfiguracaoBDE:
-    """Parâmetros configuráveis do cálculo BDE."""
-
-    teto_cota: float = 2.5
-    teto_final: float = 3.0
-    bonus_equidade: float = 1.0
-    bonus_elementares: float = 1.0
-    bonus_participacao: float = 0.5
-
-
-# ============================================================================
-# Tabela de conversão — lookup via bisect (O(log n))
-# ============================================================================
-
-
-_TABELA_CONVERSAO: Final[list[FaixaConversao]] = [
-    FaixaConversao(-0.3, 0.25),
-    FaixaConversao(-0.2, 0.50),
-    FaixaConversao(-0.1, 0.75),
-    FaixaConversao(0.0, 1.00),
-    FaixaConversao(0.1, 1.25),
-    FaixaConversao(0.2, 1.50),
-    FaixaConversao(0.3, 1.75),
-    FaixaConversao(0.4, 2.00),
+_TABELA: Final[list[tuple[float, float]]] = [
+    (-0.3, 0.25),
+    (-0.2, 0.50),
+    (-0.1, 0.75),
+    ( 0.0, 1.00),
+    ( 0.1, 1.25),
+    ( 0.2, 1.50),
+    ( 0.3, 1.75),
+    ( 0.4, 2.00),
 ]
 
-# Vetor de chaves para bisect (extrai os limites inferiores)
-_CHAVES: Final[list[float]] = [f.limite_inferior for f in _TABELA_CONVERSAO]
+_CHAVES: Final[list[float]] = [t[0] for t in _TABELA]
 
 
-def _buscar_percentual(variacao: float) -> float:
-    """
-    Busca binária na tabela de conversão.
-
-    Usa bisect_right para encontrar a faixa correta em O(log n).
-    Se a variação é menor que todos os limites, retorna 0.0.
-    """
-    if variacao < _CHAVES[0]:
+def _converter(diferenca: float) -> float:
+    """H45: busca binaria na tabela de conversao."""
+    if diferenca < _CHAVES[0]:
         return 0.0
-    indice = bisect.bisect_right(_CHAVES, variacao) - 1
-    return _TABELA_CONVERSAO[indice].percentual
+    idx = bisect.bisect_right(_CHAVES, diferenca) - 1
+    return _TABELA[idx][1]
 
 
 # ============================================================================
-# Pipeline funcional — compose / reduce
+# Formula C45 — EXATA da planilha
 # ============================================================================
 
-# Tipo para funções de transformação de etapa
-_FuncEtapa = Callable[[str, EtapaIDEPE], DetalheEtapa]
-
-
-def _extrair_etapas(requisicao: RequisicaoBDE) -> list[tuple[str, EtapaIDEPE]]:
-    """Extrai tuplas (chave, etapa) de todos os campos opcionais preenchidos."""
-    campos = [
-        ("ai", requisicao.etapa_ai),
-        ("af", requisicao.etapa_af),
-        ("em", requisicao.etapa_em),
-    ]
-    return [(chave, etapa) for chave, etapa in campos if etapa is not None]
-
-
-def _avaliar_etapa(
-    chave: str,
-    etapa: EtapaIDEPE,
-    *,
-    conversor: Callable[[float], float] = _buscar_percentual,
-) -> DetalheEtapa:
-    """Avalia uma única etapa: calcula variação e converte em percentual."""
-    variacao = round(etapa.resultado - etapa.meta, 4)
-    percentual = conversor(variacao)
-    return DetalheEtapa(
-        nome=_NOMES_ETAPAS[chave],
-        matriculas=etapa.matriculas,
-        meta=etapa.meta,
-        resultado=etapa.resultado,
-        variacao=variacao,
-        percentual_atingimento=percentual,
-    )
-
-
-def _calcular_media_ponderada(
-    etapas: Sequence[DetalheEtapa],
-) -> float:
-    """Calcula a média ponderada das variações pelas matrículas."""
-    total_matriculas = sum(e.matriculas for e in etapas)
-    if total_matriculas == 0:
-        return 0.0
-    soma_produto = sum(e.variacao * e.matriculas for e in etapas)
-    return round(soma_produto / total_matriculas, 4)
-
-
-# ============================================================================
-# Bônus independentes — strategy pattern
-# ============================================================================
-
-
-@dataclass(frozen=True)
-class Bonus:
-    """Representa um bônus independente do BDE."""
-
-    nome: float
-    valor: float
-    ativo: bool
-
-
-def _calcular_bonus(requisicao: RequisicaoBDE, config: ConfiguracaoBDE) -> list[Bonus]:
-    """
-    Calcula os bônus independentes.
-    Retorna lista de bônus ativos e inativos (para transparência).
-    """
-    return [
-        Bonus(
-            nome="equidade",
-            valor=config.bonus_equidade,
-            ativo=requisicao.reduziu_desigualdade,
-        ),
-        Bonus(
-            nome="elementares",
-            valor=config.bonus_elementares,
-            ativo=requisicao.terco_menor_elementares,
-        ),
-        Bonus(
-            nome="participacao",
-            valor=config.bonus_participacao,
-            ativo=requisicao.participacao_maior_80,
-        ),
-    ]
-
-
-def _soma_bonus_ativos(bonus: list[Bonus]) -> float:
-    """Soma os valores dos bônus ativos."""
-    return sum(b.valor for b in bonus if b.ativo)
-
-
-# ============================================================================
-# Cálculo da cota — pipeline puro
-# ============================================================================
-
-
-def _calcular_cota_bde(
+def _calcular_c45(
     percentual_idepe: float,
-    bonus: list[Bonus],
-    config: ConfiguracaoBDE,
-) -> tuple[float, float, float]:
-    """
-    Calcula a cota do BDE (C45 da planilha).
-
-    Retorna:
-        (cota_resultado, cota_alem_resultado, cota_bde_calculada)
-
-    Fórmula:
-        cota_bde = min(IDEPE + equidade + elementares, teto_cota)
-    """
-    cota_resultado = min(percentual_idepe, 1.0)
-    cota_alem_resultado = max(percentual_idepe - cota_resultado, 0.0)
-
-    bonus_eq_el = _soma_bonus_ativos(
-        [b for b in bonus if b.nome in ("equidade", "elementares")]
-    )
-    soma_bonificada = percentual_idepe + bonus_eq_el
-    cota_bde = round(min(soma_bonificada, config.teto_cota), 4)
-
-    return cota_resultado, cota_alem_resultado, cota_bde
-
-
-def _calcular_total(
-    cota_bde: float,
-    bonus: list[Bonus],
-    config: ConfiguracaoBDE,
+    tem_equidade: bool,
+    tem_elementares: bool,
 ) -> float:
-    """Calcula o percentual final com teto."""
-    bonus_part = _soma_bonus_ativos(
-        [b for b in bonus if b.nome == "participacao"]
-    )
-    return round(min(cota_bde + bonus_part, config.teto_final), 4)
+    """
+    Formula C45 da planilha, sem B44.
+
+    B40 = min(percentual_idepe, 1.0)
+    B41 = max(percentual_idepe - B40, 0.0)
+    B42 = 1 se equidade, senao 0
+    B43 = 1 se elementares, senao 0
+
+    C45 =
+      SE( E(B40=1; B41=1; B42=1; B43=1); 2.5;
+        SE( E(B40<=1; OU(B42=1; B43=1)); 1+B40;
+          SE( E((B40+B41)>1; OU(B42=1; B43=1)); 2;
+            B40
+          )
+        )
+      )
+    """
+    b40 = min(percentual_idepe, 1.0)
+    b41 = max(percentual_idepe - b40, 0.0)
+    b42 = 1.0 if tem_equidade else 0.0
+    b43 = 1.0 if tem_elementares else 0.0
+
+    # Condicao 1: todos igual a 1
+    if b40 == 1.0 and b41 == 1.0 and b42 == 1.0 and b43 == 1.0:
+        return 2.5
+
+    # Condicao 2: B40<=1 e (equidade ou elementares)
+    if b40 <= 1.0 and (b42 == 1.0 or b43 == 1.0):
+        return 1.0 + b40
+
+    # Condicao 3: (B40+B41)>1 e (equidade ou elementares)
+    if (b40 + b41) > 1.0 and (b42 == 1.0 or b43 == 1.0):
+        return 2.0
+
+    # Default
+    return b40
 
 
 # ============================================================================
 # Nomes das etapas
 # ============================================================================
 
-_NOMES_ETAPAS: Final[dict[str, str]] = {
+_NOMES: Final[dict[str, str]] = {
     "ai": "Anos Iniciais",
     "af": "Anos Finais",
-    "em": "Ensino Médio",
+    "em": "Ensino Medio",
 }
 
 
 # ============================================================================
-# Classe principal — CalculadoraBDE
+# Funcao principal
 # ============================================================================
 
+def calcular_bde(req: RequisicaoBDE) -> RespostaBDE:
+    """Calcula o BDE com a formula exata da planilha."""
 
-class CalculadoraBDE:
-    """
-    Calculadora do Bônus de Desempenho Educacional.
+    # 1. Coletar etapas
+    entrada: list[tuple[str, EtapaIDEPE]] = []
+    if req.etapa_ai is not None:
+        entrada.append(("ai", req.etapa_ai))
+    if req.etapa_af is not None:
+        entrada.append(("af", req.etapa_af))
+    if req.etapa_em is not None:
+        entrada.append(("em", req.etapa_em))
 
-    Uso:
-        calc = CalculadoraBDE()
-        resultado = calc.calcular(requisicao)
+    # 2. Diferenca por etapa
+    detalhes: list[DetalheEtapa] = []
+    for chave, etapa in entrada:
+        variacao = round(etapa.resultado - etapa.meta, 4)
+        pct = _converter(variacao)
+        detalhes.append(DetalheEtapa(
+            nome=_NOMES[chave],
+            matriculas=etapa.matriculas,
+            meta=etapa.meta,
+            resultado=etapa.resultado,
+            variacao=variacao,
+            percentual_atingimento=pct,
+        ))
 
-    Ou com configuração customizada:
-        config = ConfiguracaoBDE(teto_final=3.0)
-        calc = CalculadoraBDE(config=config)
-    """
+    # 3. Media ponderada (H47)
+    total_mat = sum(d.matriculas for d in detalhes)
+    soma = sum(d.variacao * d.matriculas for d in detalhes)
+    media = round(soma / total_mat, 4) if total_mat else 0.0
 
-    def __init__(self, config: ConfiguracaoBDE | None = None) -> None:
-        self._config = config or ConfiguracaoBDE()
+    # 4. Percentual IDEPE (H45)
+    percentual_idepe = _converter(media)
 
-    def calcular(self, requisicao: RequisicaoBDE) -> RespostaBDE:
-        """Executa o pipeline completo de cálculo do BDE."""
+    # 5. B40 / B41
+    cota_resultado = min(percentual_idepe, 1.0)
+    cota_alem = max(percentual_idepe - cota_resultado, 0.0)
 
-        # 1. Extrair e avaliar etapas
-        etapas_entrada = _extrair_etapas(requisicao)
-        detalhes = [_avaliar_etapa(chave, etapa) for chave, etapa in etapas_entrada]
+    # 6. B42 / B43 / B44
+    cota_eq = 1.0 if req.reduziu_desigualdade else 0.0
+    cota_el = 1.0 if req.terco_menor_elementares else 0.0
+    cota_part = 0.5 if req.participacao_maior_80 else 0.0
 
-        # 2. Média ponderada
-        media = _calcular_media_ponderada(detalhes)
+    # 7. C45 (formula exata)
+    cota_bde = _calcular_c45(percentual_idepe, req.reduziu_desigualdade, req.terco_menor_elementares)
 
-        # 3. Percentual IDEPE (conversão da média)
-        percentual_idepe = _buscar_percentual(media)
+    # 8. Total = C45 + B44
+    percentual_final = round(cota_bde + cota_part, 4)
+    apto = percentual_final > 0.0
 
-        # 4. Bônus independentes
-        bonus = _calcular_bonus(requisicao, self._config)
-
-        # 5. Cota do BDE
-        cota_res, cota_alem, cota_bde = _calcular_cota_bde(
-            percentual_idepe, bonus, self._config
-        )
-
-        # 6. Total final
-        total = _calcular_total(cota_bde, bonus, self._config)
-
-        return RespostaBDE(
-            percentual_bde=total,
-            percentual_formatado=f"{total * 100:.0f}%",
-            media_ponderada_variacao=media,
-            percentual_idepe=percentual_idepe,
-            bonus_equidade=_valor_bonus(bonus, "equidade"),
-            bonus_elementares=_valor_bonus(bonus, "elementares"),
-            bonus_participacao=_valor_bonus(bonus, "participacao"),
-            cota_resultado=cota_res,
-            cota_alem_resultado=cota_alem,
-            cota_bde_calculada=cota_bde,
-            apto_a_receber=total > 0.0,
-            etapas=detalhes,
-        )
-
-
-def _valor_bonus(bonus: list[Bonus], nome: str) -> float:
-    """Extrai o valor de um bônus pelo nome (0.0 se inativo)."""
-    for b in bonus:
-        if b.nome == nome:
-            return b.valor if b.ativo else 0.0
-    return 0.0
-
-
-# ============================================================================
-# Função de conveniência (API pública)
-# ============================================================================
-
-
-def calcular_bde(requisicao: RequisicaoBDE) -> RespostaBDE:
-    """Função de conveniência — mantém compatibilidade com o router."""
-    return CalculadoraBDE().calcular(requisicao)
+    return RespostaBDE(
+        percentual_bde=percentual_final,
+        percentual_formatado=f"{percentual_final * 100:.0f}%",
+        apto_a_receber=apto,
+        media_ponderada_variacao=media,
+        percentual_idepe=percentual_idepe,
+        cota_resultado=cota_resultado,
+        cota_alem_resultado=cota_alem,
+        cota_equidade=cota_eq,
+        cota_elementares=cota_el,
+        cota_participacao=cota_part,
+        cota_bde_calculada=cota_bde,
+        bonus_equidade=cota_eq,
+        bonus_elementares=cota_el,
+        bonus_participacao=cota_part,
+        etapas=detalhes,
+    )
