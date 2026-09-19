@@ -1,5 +1,7 @@
 # Simulador BDE — NGR-SEE
 
+![Simulador BDE](app/static/img/UI-BDE-INTERFACE3.png)
+
 Sistema interativo para simulacao do Bonus de Desempenho Educacional (BDE) de Pernambuco.
 
 ## O que e?
