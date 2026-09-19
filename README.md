@@ -4,7 +4,7 @@ Sistema interativo para simulacao do Bonus de Desempenho Educacional (BDE) de Pe
 
 ## O que e?
 
-O Simulador BDE foi desenvolvido pelo Nucleo de Gestao para Resultados na Educacao (NGR-SEE) / Seplag para facilitar a vida dos gestores escolares. Antes, o calculo do BDE era feito manualmente em planilhas Excel complexas. Agora, basta preencher os dados em um passo a passo guiado e o sistema faz todo o calculo automaticamente.
+O Simulador BDE foi desenvolvido pelo Nucleo de Gestao para Resultados na Educacao (NGR-SEE) / Seplag para facilitar a vida dos gestores escolares. Antes, o calculo do BDE era feito manualmente em planilhas Excel. Agora, basta preencher os dados em um passo a passo guiado e o sistema faz todo o calculo automaticamente.
 
 ## Funcionalidades
 
@@ -17,7 +17,7 @@ O Simulador BDE foi desenvolvido pelo Nucleo de Gestao para Resultados na Educac
 ## Como executar
 
 ```bash
-cd "D:\Projetos TECH\BDE-Interface"
+cd "D:\exemplo\mudar-caminho"
 python -m uvicorn main:app --reload
 ```
 
