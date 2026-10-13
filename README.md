@@ -1,8 +1,8 @@
-# Simulador BDE — NGR-SEE
+# Simulador BDE
 
-![Simulador BDE](app/static/img/UI-BDE-INTERFACE3.png)
+![Simulador BDE](images/1.png)
 
-Sistema interativo para simulacao do Bonus de Desempenho Educacional (BDE) de Pernambuco.
+Aplicação web para apoiar gestores escolares de Pernambuco na simulação do Bônus de Desempenho Educacional (BDE), com preenchimento guiado e apresentação detalhada dos resultados.
 
 ## O que e?
 
@@ -16,37 +16,32 @@ O Simulador BDE foi desenvolvido pelo Nucleo de Gestao para Resultados na Educac
 - **Explicacoes interativas**: clique nos cards do resultado para entender cada metrica
 - **Contato integrado**: WhatsApp para suporte
 
-## Como executar
+## Executar localmente
 
-```bash
-cd "D:\exemplo\mudar-caminho"
+Requer Python 3.9 ou superior.
+
+```powershell
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 python -m uvicorn main:app --reload
 ```
 
-Acesse: http://127.0.0.1:8000
+Acesse <http://127.0.0.1:8000>.
 
-## Publicacao (Google Sites / GitHub Pages)
+## Testes
 
-O `index.html` na raiz e a mesma interface sem servidor: os tres arquivos de
-`app/` reunidos, com o calculo em JavaScript no lugar da chamada a API. E o que
-o GitHub Pages serve em https://monkius-maximus.github.io/bdengroutubro/ e o
-que o Google Sites embute.
-
-Mexeu em `app/`? Regenere e rode os testes:
-
-```bash
-python3 tools/gerar_index.py
-python3 tests/test_paridade.py
-python3 tests/test_cenarios.py
+```powershell
+python tests/test_cenarios.py
+python tests/test_limites.py
+python tests/test_paridade.py
 ```
 
-A regra do BDE vive em dois lugares — `src/bde/service.py` e
-`app/static/js/motor.js`. Mudou num, mude no outro: `test_paridade.py` compara
-os dois campo a campo e `test_cenarios.py` confere a tabela da regra.
-Passo a passo em [`docs/GOOGLE_SITES.md`](docs/GOOGLE_SITES.md).
+O teste de paridade também requer Node.js.
 
-## Stack
+## Estrutura
 
-- **Backend**: FastAPI + Python
-- **Frontend**: HTML + CSS + JavaScript vanilla
-- **Templates**: Jinja2
+- `app/`: interface e recursos web.
+- `src/bde/`: API e serviço da aplicação.
+- `tests/`: verificações automatizadas.
+- `tools/`: ferramentas auxiliares.
